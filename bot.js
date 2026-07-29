@@ -38,12 +38,14 @@ async function getResult(ctx, roll) {
 
     try {
 
-        const response = await axios.get(`${API}?roll=${encodeURIComponent(roll)}`);
-        const json = response.data;
+        const { data } = await axios.get(API, {
+            params: {
+                roll: roll,
+                curriculumId: "diploma_in_engineering"
+            }
+        });
 
-        console.log(JSON.stringify(json, null, 2));
-
-        if (!json.success || !json.data) {
+        if (!data.success || !data.data || data.data.length === 0) {
             return ctx.telegram.editMessageText(
                 ctx.chat.id,
                 loading.message_id,
@@ -52,62 +54,57 @@ async function getResult(ctx, roll) {
             );
         }
 
-        const s = json.data;
+        const s = data.data[0];
 
-        const caption = `
-🎓 <b>SDPI Student Information</b>
+        let semesters = "";
 
-👤 <b>Name:</b> ${s.name}
-📝 <b>বাংলা নাম:</b> ${s.nameBn}
+        s.latestResults.forEach(r => {
+            semesters += `📘 Semester ${r.semester}\n`;
+            semesters += `⭐ GPA: ${r.gpa}\n`;
+            semesters += `📅 ${r.date.substring(0,10)}\n\n`;
+        });
 
-🏗 <b>Department:</b> ${s.dept}
+        const message = `
+🎓 <b>BTEB Student Result</b>
+
 🆔 <b>Roll:</b> ${s.roll}
-📄 <b>Registration:</b> ${s.reg}
-📚 <b>Session:</b> ${s.session}
-🌅 <b>Shift:</b> ${s.shift}
 
-🩸 <b>Blood Group:</b> ${s.bloodGroup}
+🏫 <b>Institute:</b>
+${s.institute.name}
 
-👨 <b>Father:</b> ${s.fatherBn}
-👩 <b>Mother:</b> ${s.motherBn}
+📍 <b>District:</b>
+${s.institute.district}
 
-🏠 <b>Address:</b>
-${s.village}
-${s.post}
-${s.upazila}, ${s.district}
+📖 <b>Curriculum:</b>
+${s.curriculumId}
 
-📌 <b>Status:</b> ${s.status}
+📚 <b>Regulation:</b>
+${s.regulation}
+
+━━━━━━━━━━━━━━
+
+${semesters}
 `;
 
-        await ctx.deleteMessage(loading.message_id);
-
-        if (s.photoUrl && s.photoUrl.startsWith("http")) {
-
-            await ctx.replyWithPhoto(
-                s.photoUrl,
-                {
-                    caption,
-                    parse_mode: "HTML",
-                    reply_markup: {
-                        inline_keyboard: [
-                            [
-                                {
-                                    text: "🌐 SDPI Website",
-                                    url: "https://sdpi.pro.bd"
-                                }
-                            ]
+        await ctx.telegram.editMessageText(
+            ctx.chat.id,
+            loading.message_id,
+            undefined,
+            message,
+            {
+                parse_mode: "HTML",
+                reply_markup: {
+                    inline_keyboard: [
+                        [
+                            {
+                                text: "🌐 Open Website",
+                                url: `https://btebresultszone.com/results?roll=${roll}`
+                            }
                         ]
-                    }
+                    ]
                 }
-            );
-
-        } else {
-
-            await ctx.reply(caption, {
-                parse_mode: "HTML"
-            });
-
-        }
+            }
+        );
 
     } catch (err) {
 
@@ -123,29 +120,3 @@ ${s.upazila}, ${s.district}
     }
 
 }
-
-bot.command("result", (ctx) => {
-
-    const args = ctx.message.text.trim().split(/\s+/);
-
-    if (args.length < 2) {
-        return ctx.reply("Usage:\n/result 240363");
-    }
-
-    getResult(ctx, args[1]);
-
-});
-
-bot.on("text", (ctx) => {
-
-    const roll = ctx.message.text.trim();
-
-    if (/^\d+$/.test(roll)) {
-        getResult(ctx, roll);
-    }
-
-});
-
-bot.launch();
-
-console.log("✅ SDPI Bot Running...");
