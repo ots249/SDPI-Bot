@@ -14,8 +14,131 @@ const API_URL =
 const userState = {};
 
 // User Data Storage (In-memory - for demo purposes)
-// In production, use a database like MongoDB, PostgreSQL, etc.
 const userData = {};
+
+// Curriculum Options
+const CURRICULUMS = {
+  DIPLOMA_ENGINEERING: {
+    id: "diploma_in_engineering",
+    name: "Diploma In Engineering",
+    emoji: "🔧",
+    short: "Engineering"
+  },
+  DIPLOMA_ENGINEERING_ARMY: {
+    id: "diploma_in_engineering_army",
+    name: "Diploma In Engineering (Army)",
+    emoji: "🪖",
+    short: "Army"
+  },
+  DIPLOMA_ENGINEERING_NAVAL: {
+    id: "diploma_in_engineering_naval",
+    name: "Diploma In Engineering (Naval)",
+    emoji: "⚓",
+    short: "Naval"
+  },
+  DIPLOMA_TEXTILE: {
+    id: "diploma_in_textile_engineering",
+    name: "Diploma In Textile Engineering",
+    emoji: "🧵",
+    short: "Textile"
+  },
+  DIPLOMA_TOURISM: {
+    id: "diploma_in_tourism_and_hospitality",
+    name: "Diploma In Tourism And Hospitality",
+    emoji: "🏨",
+    short: "Tourism"
+  },
+  DIPLOMA_AGRICULTURE: {
+    id: "diploma_in_agriculture",
+    name: "Diploma In Agriculture",
+    emoji: "🌾",
+    short: "Agriculture"
+  },
+  DIPLOMA_FISHERIES: {
+    id: "diploma_in_fisheries",
+    name: "Diploma In Fisheries",
+    emoji: "🐟",
+    short: "Fisheries"
+  },
+  DIPLOMA_FORESTRY: {
+    id: "diploma_in_forestry",
+    name: "Diploma In Forestry",
+    emoji: "🌳",
+    short: "Forestry"
+  },
+  DIPLOMA_LIVESTOCK: {
+    id: "diploma_in_livestock",
+    name: "Diploma In Livestock",
+    emoji: "🐄",
+    short: "Livestock"
+  },
+  CERTIFICATE_MARINE: {
+    id: "certificate_in_marine_trade",
+    name: "Certificate In Marine Trade",
+    emoji: "⛵",
+    short: "Marine"
+  },
+  DIPLOMA_MEDICAL: {
+    id: "diploma_in_medical_technology",
+    name: "Diploma In Medical Technology",
+    emoji: "🏥",
+    short: "Medical"
+  },
+  ADVANCED_CERTIFICATE: {
+    id: "advanced_certificate_course",
+    name: "Advanced Certificate Course",
+    emoji: "📜",
+    short: "Advanced"
+  },
+  NATIONAL_SKILL: {
+    id: "national_skill_standard_basic_certificate",
+    name: "National Skill Standard Basic Certificate",
+    emoji: "🛠️",
+    short: "Skill"
+  },
+  ONE_YEAR_CERTIFICATE: {
+    id: "one_year_certificate_course",
+    name: "One Year Certificate Course",
+    emoji: "📅",
+    short: "1 Year"
+  },
+  DIPLOMA_COMMERCE: {
+    id: "diploma_in_commerce",
+    name: "Diploma In Commerce",
+    emoji: "💼",
+    short: "Commerce"
+  },
+  CERTIFICATE_ULTRASOUND: {
+    id: "certificate_in_medical_ultrasound",
+    name: "Certificate In Medical Ultrasound",
+    emoji: "🫀",
+    short: "Ultrasound"
+  },
+  HSC_BUSINESS: {
+    id: "hsc_business_management",
+    name: "HSC (Business Management)",
+    emoji: "📊",
+    short: "HSC BM"
+  },
+  HSC_VOCATIONAL: {
+    id: "hsc_vocational",
+    name: "HSC (Vocational)",
+    emoji: "🎯",
+    short: "HSC Voc"
+  },
+  SSC_VOCATIONAL: {
+    id: "ssc_vocational",
+    name: "SSC (Vocational)",
+    emoji: "📚",
+    short: "SSC Voc"
+  },
+  DAKHIL_VOCATIONAL: {
+    id: "dakhil_vocational",
+    name: "Dakhil (Vocational)",
+    emoji: "🕌",
+    short: "Dakhil"
+  }
+};
 
 // Render Health Check
 const PORT = process.env.PORT || 3000;
@@ -40,7 +163,7 @@ const mainMenu = Markup.keyboard([
   ["📊 Semester GPA", "📕 Referred Subjects"],
   ["📜 Search History", "🔄 Re-scrutiny Status"],
   ["📖 Help", "ℹ️ About"],
-  ["🌐 Website"]
+  ["🌐 Website", "📚 Select Curriculum"]
 ])
   .resize()
   .persistent();
@@ -58,24 +181,118 @@ bot.start(async (ctx) => {
     userData[userId] = {
       savedRoll: null,
       searchHistory: [],
-      lastResult: null
+      lastResult: null,
+      lastResultRescrutiny: null,
+      selectedCurriculum: "diploma_in_engineering" // Default
     };
   }
 
   await ctx.replyWithHTML(
 `🎓 <b>Welcome to BTEB Student Result Bot</b>
 
-এই বটের মাধ্যমে Diploma in Engineering-এর Result দেখতে পারবেন।
+এই বটের মাধ্যমে বিভিন্ন Curriculum-এর Result দেখতে পারবেন।
 
 ✨ <b>Features:</b>
-• 🔍 Search Result by Roll
+• 🔍 Check Result with Curriculum Selection
 • ⭐ Save & View Your Result
 • 📜 Search History (Last 5)
 • 📊 Semester-wise GPA
 • 📕 Referred Subjects
 • 🔄 Re-scrutiny Status
+• 📚 20+ Curriculum Support
 
-নিচের Menu থেকে একটি অপশন নির্বাচন করুন।`,
+📌 <b>How to Check Result:</b>
+1️⃣ Click "🔍 Check Result"
+2️⃣ Select your Curriculum
+3️⃣ Enter your Board Roll
+
+💡 <b>Default Curriculum:</b> Diploma In Engineering
+📚 Change using "📚 Select Curriculum" button`,
+mainMenu
+  );
+});
+
+// ===============================
+// SELECT CURRICULUM (Main Menu)
+// ===============================
+
+bot.hears("📚 Select Curriculum", async (ctx) => {
+  await showCurriculumSelection(ctx);
+});
+
+// ===============================
+// CHECK RESULT FLOW
+// ===============================
+
+bot.hears("🔍 Check Result", async (ctx) => {
+  const userId = ctx.from.id;
+  userState[userId] = { step: "SELECTING_CURRICULUM" };
+  
+  await ctx.replyWithHTML(
+`🔍 <b>Check Result - Step 1/2</b>
+
+📚 <b>Select Your Curriculum</b>
+
+নিচ থেকে আপনার Curriculum নির্বাচন করুন:
+
+💡 <b>Current:</b> ${getCurriculumName(userData[userId]?.selectedCurriculum)}`,
+    {
+      reply_markup: {
+        inline_keyboard: getCurriculumButtons()
+      }
+    }
+  );
+});
+
+// Curriculum Selection Callback (from Check Result)
+bot.action(/^check_curr_(.+)$/, async (ctx) => {
+  const curriculumId = ctx.match[1];
+  const userId = ctx.from.id;
+  
+  // Find curriculum name
+  const curriculum = Object.values(CURRICULUMS).find(c => c.id === curriculumId);
+  
+  if (!curriculum) {
+    await ctx.answerCbQuery("❌ Invalid curriculum selected");
+    return;
+  }
+
+  // Save selected curriculum
+  if (!userData[userId]) {
+    userData[userId] = {
+      savedRoll: null,
+      searchHistory: [],
+      lastResult: null,
+      lastResultRescrutiny: null,
+      selectedCurriculum: curriculumId
+    };
+  } else {
+    userData[userId].selectedCurriculum = curriculumId;
+  }
+
+  // Update state to waiting for roll
+  userState[userId] = { 
+    step: "WAITING_ROLL",
+    curriculum: curriculumId
+  };
+
+  await ctx.answerCbQuery(`✅ ${curriculum.name} selected`);
+  
+  await ctx.replyWithHTML(
+`✅ <b>Curriculum Selected!</b>
+
+📚 <b>${curriculum.emoji} ${curriculum.name}</b>
+
+━━━━━━━━━━━━━━
+
+🔍 <b>Step 2/2 - Enter Your Roll</b>
+
+📝 আপনার <b>Board Roll</b> পাঠান।
+
+<b>Example:</b>
+<code>240363</code>
+
+💡 Result automatically save করবে।`,
 mainMenu
   );
 });
@@ -89,7 +306,9 @@ bot.help(async (ctx) => {
 `📖 <b>How to Use</b>
 
 <b>🔍 Check Result</b>
-• ক্লিক করুন এবং আপনার Board Roll পাঠান
+• Click "🔍 Check Result"
+• Select your Curriculum
+• Enter your Board Roll
 
 <b>⭐ My Result</b>
 • আপনার সংরক্ষিত ফলাফল দেখুন
@@ -106,6 +325,9 @@ bot.help(async (ctx) => {
 <b>🔄 Re-scrutiny Status</b>
 • Re-scrutiny স্ট্যাটাস দেখুন
 
+<b>📚 Select Curriculum</b>
+• আপনার Curriculum পরিবর্তন করুন
+
 <b>📝 Direct Search:</b>
 সরাসরি আপনার Board Roll পাঠান
 
@@ -119,23 +341,6 @@ mainMenu
 // MENU BUTTONS
 // ===============================
 
-// Check Result
-bot.hears("🔍 Check Result", async (ctx) => {
-  userState[ctx.from.id] = "WAITING_ROLL";
-
-  await ctx.replyWithHTML(
-`🔍 <b>Check Result</b>
-
-📝 আপনার <b>Board Roll</b> পাঠান।
-
-<b>Example:</b>
-<code>240363</code>
-
-💡 Tip: Result সংরক্ষণ করতে "⭐ My Result" ব্যবহার করুন।`,
-mainMenu
-  );
-});
-
 // My Result (Saved Result)
 bot.hears("⭐ My Result", async (ctx) => {
   const userId = ctx.from.id;
@@ -148,19 +353,18 @@ bot.hears("⭐ My Result", async (ctx) => {
 
 🔍 <b>How to Save:</b>
 1. "🔍 Check Result" ব্যবহার করুন
-2. আপনার Roll পাঠান
-3. Automatically সংরক্ষিত হবে
+2. Curriculum নির্বাচন করুন
+3. আপনার Roll পাঠান
+4. Automatically সংরক্ষিত হবে
 
 অথবা সরাসরি Roll পাঠান।`,
 mainMenu
     );
   }
 
-  // Check if we have the saved result data
   if (userData[userId]?.lastResult) {
     await displayResult(ctx, userData[userId].lastResult, userData[userId].savedRoll);
   } else {
-    // Fetch the saved result again
     await getResult(ctx, userData[userId].savedRoll, true);
   }
 });
@@ -315,7 +519,9 @@ mainMenu
       hour: '2-digit',
       minute: '2-digit'
     });
-    historyText += `${index + 1}. <code>${item.roll}</code> - ${date}\n`;
+    const curriculum = item.curriculum ? Object.values(CURRICULUMS).find(c => c.id === item.curriculum) : null;
+    const currEmoji = curriculum?.emoji || "📚";
+    historyText += `${index + 1}. ${currEmoji} <code>${item.roll}</code> - ${date}\n`;
   });
 
   const message = 
@@ -415,7 +621,9 @@ bot.hears("📖 Help", async (ctx) => {
 `📖 <b>How to Use</b>
 
 <b>🔍 Check Result</b>
-• ক্লিক করুন এবং আপনার Board Roll পাঠান
+• Click "🔍 Check Result"
+• Select your Curriculum
+• Enter your Board Roll
 
 <b>⭐ My Result</b>
 • আপনার সংরক্ষিত ফলাফল দেখুন
@@ -431,6 +639,9 @@ bot.hears("📖 Help", async (ctx) => {
 
 <b>🔄 Re-scrutiny Status</b>
 • Re-scrutiny স্ট্যাটাস দেখুন
+
+<b>📚 Select Curriculum</b>
+• আপনার Curriculum পরিবর্তন করুন
 
 <b>📝 Direct Search:</b>
 সরাসরি আপনার Board Roll পাঠান
@@ -448,21 +659,24 @@ bot.hears("ℹ️ About", async (ctx) => {
 
 🎓 BTEB Student Result Bot
 
-⚡ Version: 3.0
+⚡ Version: 4.0
 
 ✨ <b>Features:</b>
-• Real-time Result Check
+• Step-by-step Result Check
+• 20+ Curriculum Support
 • Save & View Results
 • Search History (Last 5)
 • Semester-wise GPA
 • Referred Subjects
 • Re-scrutiny Status
-• Beautiful HTML Result
 
 🌐 Data Source:
 BTEB Results Zone
 
-👨‍💻 Powered by SDPI`,
+👨‍💻 Powered by SDPI
+
+📚 <b>Supported Curriculums:</b>
+${Object.values(CURRICULUMS).map(c => `${c.emoji} ${c.name}`).join('\n')}`,
 mainMenu
   );
 });
@@ -485,10 +699,15 @@ bot.command("result", async (ctx) => {
     return ctx.replyWithHTML(
 `❌ <b>Usage</b>
 
-<code>/result 240363</code>`
+<code>/result 240363</code>
+<code>/result 240363 diploma_in_engineering</code>`
     );
   }
-  await getResult(ctx, args[1]);
+  
+  const roll = args[1];
+  const curriculum = args[2] || userData[ctx.from.id]?.selectedCurriculum || "diploma_in_engineering";
+  
+  await getResult(ctx, roll, false, curriculum);
 });
 
 // /save command
@@ -522,7 +741,9 @@ mainMenu
   
   history.forEach((item, index) => {
     const date = new Date(item.timestamp).toLocaleDateString('bn-BD');
-    historyText += `${index + 1}. <code>${item.roll}</code> - ${date}\n`;
+    const curriculum = item.curriculum ? Object.values(CURRICULUMS).find(c => c.id === item.curriculum) : null;
+    const currEmoji = curriculum?.emoji || "📚";
+    historyText += `${index + 1}. ${currEmoji} <code>${item.roll}</code> - ${date}\n`;
   });
 
   await ctx.replyWithHTML(
@@ -530,6 +751,11 @@ mainMenu
 
 ${historyText}`
   );
+});
+
+// /curriculum command
+bot.command("curriculum", async (ctx) => {
+  await showCurriculumSelection(ctx);
 });
 
 // ===============================
@@ -549,28 +775,88 @@ bot.on("text", async (ctx) => {
     "🔄 Re-scrutiny Status",
     "📖 Help",
     "ℹ️ About",
-    "🌐 Website"
+    "🌐 Website",
+    "📚 Select Curriculum"
   ];
   
   if (menuButtons.includes(text)) return;
 
-  // Waiting for Roll
-  if (userState[ctx.from.id] === "WAITING_ROLL") {
-    delete userState[ctx.from.id];
-    return await getResult(ctx, text);
+  const userId = ctx.from.id;
+
+  // Check if user is in WAITING_ROLL state
+  if (userState[userId]?.step === "WAITING_ROLL") {
+    const curriculum = userState[userId].curriculum || userData[userId]?.selectedCurriculum || "diploma_in_engineering";
+    delete userState[userId];
+    return await getResult(ctx, text, false, curriculum);
   }
 
-  // Direct Roll
+  // Direct Roll (with default curriculum)
   if (/^\d{6}$/.test(text)) {
-    return await getResult(ctx, text);
+    const curriculum = userData[userId]?.selectedCurriculum || "diploma_in_engineering";
+    return await getResult(ctx, text, false, curriculum);
   }
 });
+
+// ===============================
+// HELPER FUNCTIONS
+// ===============================
+
+function getCurriculumButtons() {
+  const buttons = Object.values(CURRICULUMS).map((curr) => [
+    Markup.button.callback(
+      `${curr.emoji} ${curr.short || curr.name}`,
+      `check_curr_${curr.id}`
+    )
+  ]);
+
+  // Format in 2 columns
+  const twoColumnButtons = [];
+  for (let i = 0; i < buttons.length; i += 2) {
+    if (i + 1 < buttons.length) {
+      twoColumnButtons.push([buttons[i][0], buttons[i + 1][0]]);
+    } else {
+      twoColumnButtons.push([buttons[i][0]]);
+    }
+  }
+  
+  // Add cancel button
+  twoColumnButtons.push([
+    Markup.button.callback("❌ Cancel", "cancel_check")
+  ]);
+  
+  return twoColumnButtons;
+}
+
+function getCurriculumName(curriculumId) {
+  if (!curriculumId) return "Diploma In Engineering";
+  const curriculum = Object.values(CURRICULUMS).find(c => c.id === curriculumId);
+  return curriculum ? `${curriculum.emoji} ${curriculum.name}` : "Diploma In Engineering";
+}
+
+async function showCurriculumSelection(ctx) {
+  const userId = ctx.from.id;
+  const currentCurr = userData[userId]?.selectedCurriculum || "diploma_in_engineering";
+  const currentName = getCurriculumName(currentCurr);
+
+  await ctx.replyWithHTML(
+`📚 <b>Select Your Curriculum</b>
+
+বর্তমান Curriculum: <code>${currentName}</code>
+
+নিচ থেকে আপনার Curriculum নির্বাচন করুন:`,
+    {
+      reply_markup: {
+        inline_keyboard: getCurriculumButtons()
+      }
+    }
+  );
+}
 
 // ===============================
 // GET RESULT
 // ===============================
 
-async function getResult(ctx, roll, isSaved = false) {
+async function getResult(ctx, roll, isSaved = false, curriculumId = null) {
   let loading;
 
   try {
@@ -584,13 +870,16 @@ Example:
       );
     }
 
+    const userId = ctx.from.id;
+    const curriculum = curriculumId || userData[userId]?.selectedCurriculum || "diploma_in_engineering";
+    
     loading = await ctx.reply("⏳ Checking result...");
 
-    // API Call
+    // API Call with curriculum
     const { data } = await axios.get(API_URL, {
       params: {
         roll,
-        curriculumId: "diploma_in_engineering"
+        curriculumId: curriculum
       },
       timeout: 15000
     });
@@ -601,7 +890,7 @@ Example:
         ctx.chat.id,
         loading.message_id,
         undefined,
-        "❌ Result not found."
+        "❌ Result not found for this Roll and Curriculum."
       );
     }
 
@@ -610,13 +899,13 @@ Example:
     const rescrutiny = data.data.find(r => r.regulation === 0);
 
     // Save to user data
-    const userId = ctx.from.id;
     if (!userData[userId]) {
       userData[userId] = {
         savedRoll: null,
         searchHistory: [],
         lastResult: null,
-        lastResultRescrutiny: null
+        lastResultRescrutiny: null,
+        selectedCurriculum: curriculum
       };
     }
 
@@ -625,6 +914,7 @@ Example:
       userData[userId].savedRoll = roll;
       userData[userId].lastResult = student;
       userData[userId].lastResultRescrutiny = rescrutiny;
+      userData[userId].selectedCurriculum = curriculum;
       
       // Add to search history
       if (!userData[userId].searchHistory) {
@@ -633,6 +923,7 @@ Example:
       
       userData[userId].searchHistory.unshift({
         roll: roll,
+        curriculum: curriculum,
         timestamp: Date.now()
       });
       
@@ -820,10 +1111,13 @@ Example:
       );
     }
 
+    const userId = ctx.from.id;
+    const curriculum = userData[userId]?.selectedCurriculum || "diploma_in_engineering";
+
     const { data } = await axios.get(API_URL, {
       params: {
         roll,
-        curriculumId: "diploma_in_engineering"
+        curriculumId: curriculum
       },
       timeout: 15000
     });
@@ -835,13 +1129,13 @@ Example:
     const student = data.data.find(r => r.regulation !== 0) || data.data[0];
     const rescrutiny = data.data.find(r => r.regulation === 0);
 
-    const userId = ctx.from.id;
     if (!userData[userId]) {
       userData[userId] = {
         savedRoll: null,
         searchHistory: [],
         lastResult: null,
-        lastResultRescrutiny: null
+        lastResultRescrutiny: null,
+        selectedCurriculum: curriculum
       };
     }
 
@@ -868,6 +1162,19 @@ mainMenu
 // ===============================
 // CALLBACK HANDLERS
 // ===============================
+
+// Cancel Check
+bot.action("cancel_check", async (ctx) => {
+  const userId = ctx.from.id;
+  delete userState[userId];
+  await ctx.answerCbQuery("❌ Cancelled");
+  await ctx.replyWithHTML(
+`❌ <b>Search Cancelled</b>
+
+আবার চেষ্টা করতে "🔍 Check Result" ব্যবহার করুন।`,
+mainMenu
+  );
+});
 
 // Save Result
 bot.action(/^save_result_(.+)$/, async (ctx) => {
@@ -1010,7 +1317,9 @@ bot.action("view_history", async (ctx) => {
   
   history.forEach((item, index) => {
     const date = new Date(item.timestamp).toLocaleDateString('bn-BD');
-    historyText += `${index + 1}. <code>${item.roll}</code> - ${date}\n`;
+    const curriculum = item.curriculum ? Object.values(CURRICULUMS).find(c => c.id === item.curriculum) : null;
+    const currEmoji = curriculum?.emoji || "📚";
+    historyText += `${index + 1}. ${currEmoji} <code>${item.roll}</code> - ${date}\n`;
   });
 
   await ctx.replyWithHTML(
@@ -1024,19 +1333,33 @@ ${historyText}`
 bot.action(/^view_history_(.+)$/, async (ctx) => {
   const roll = ctx.match[1];
   await ctx.answerCbQuery();
-  await getResult(ctx, roll);
+  
+  const userId = ctx.from.id;
+  const historyItem = userData[userId]?.searchHistory?.find(h => h.roll === roll);
+  const curriculum = historyItem?.curriculum || userData[userId]?.selectedCurriculum || "diploma_in_engineering";
+  
+  await getResult(ctx, roll, false, curriculum);
 });
 
 // Search Again
 bot.action("search_again", async (ctx) => {
-  userState[ctx.from.id] = "WAITING_ROLL";
+  const userId = ctx.from.id;
+  userState[userId] = { step: "SELECTING_CURRICULUM" };
   await ctx.answerCbQuery();
   
   await ctx.replyWithHTML(
-`🔍 <b>Search Again</b>
+`🔍 <b>Search Again - Step 1/2</b>
 
-📝 নতুন <b>Board Roll</b> পাঠান।`,
-mainMenu
+📚 <b>Select Your Curriculum</b>
+
+নিচ থেকে আপনার Curriculum নির্বাচন করুন:
+
+💡 <b>Current:</b> ${getCurriculumName(userData[userId]?.selectedCurriculum)}`,
+    {
+      reply_markup: {
+        inline_keyboard: getCurriculumButtons()
+      }
+    }
   );
 });
 
