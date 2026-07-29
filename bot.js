@@ -4,7 +4,8 @@ const { Telegraf, Markup } = require("telegraf");
 const axios = require("axios");
 
 const bot = new Telegraf(process.env.BOT_TOKEN);
-const API = process.env.API_URL;
+
+const API = process.env.API_URL || "https://btebresultszone.com/api/student-results";
 
 bot.start((ctx) => {
     ctx.reply(
@@ -15,21 +16,29 @@ bot.start((ctx) => {
 Example:
 240363
 
-Or use:
+Or
+
 /result 240363`,
         Markup.inlineKeyboard([
-            [Markup.button.url("🌐 SDPI Website", "https://sdpi.pro.bd")]
+            [
+                Markup.button.url(
+                    "🌐 BTEB Results Zone",
+                    "https://btebresultszone.com"
+                )
+            ]
         ])
     );
 });
 
 bot.help((ctx) => {
-    ctx.reply(`Commands
+    ctx.reply(
+`📖 Commands
 
 /result <roll>
 
 Example:
-/result 240363`);
+/result 240363`
+    );
 });
 
 async function getResult(ctx, roll) {
@@ -38,59 +47,71 @@ async function getResult(ctx, roll) {
 
     try {
 
-        const { data } = await axios.get(API, {
+        const response = await axios.get(API, {
             params: {
                 roll: roll,
                 curriculumId: "diploma_in_engineering"
-            }
+            },
+            timeout: 15000
         });
 
-        if (!data.success || !data.data || data.data.length === 0) {
+        const json = response.data;
+
+        console.log(JSON.stringify(json, null, 2));
+
+        if (!json.success || !json.data || json.data.length === 0) {
+
             return ctx.telegram.editMessageText(
                 ctx.chat.id,
                 loading.message_id,
                 undefined,
                 "❌ Result not found."
             );
+
         }
 
-        const s = data.data[0];
+        const student = json.data[0];
 
-        let semesters = "";
+        let semesterText = "";
 
-        s.latestResults.forEach(r => {
-            semesters += `📘 Semester ${r.semester}\n`;
-            semesters += `⭐ GPA: ${r.gpa}\n`;
-            semesters += `📅 ${r.date.substring(0,10)}\n\n`;
-        });
+        if (student.latestResults) {
 
-        const message = `
-🎓 <b>BTEB Student Result</b>
+            student.latestResults.forEach(r => {
 
-🆔 <b>Roll:</b> ${s.roll}
+                semesterText +=
+`📘 Semester : ${r.semester}
+⭐ GPA : ${r.gpa}
+📅 Date : ${r.date.substring(0,10)}
+
+`;
+
+            });
+
+        }
+
+        const text =
+`🎓 <b>BTEB Student Result</b>
+
+🆔 <b>Roll:</b> ${student.roll}
 
 🏫 <b>Institute:</b>
-${s.institute.name}
+${student.institute.name}
 
 📍 <b>District:</b>
-${s.institute.district}
-
-📖 <b>Curriculum:</b>
-${s.curriculumId}
+${student.institute.district}
 
 📚 <b>Regulation:</b>
-${s.regulation}
+${student.regulation}
 
 ━━━━━━━━━━━━━━
 
-${semesters}
-`;
+${semesterText}`;
 
         await ctx.telegram.editMessageText(
             ctx.chat.id,
             loading.message_id,
             undefined,
-            message,
+            text,
             {
                 parse_mode: "HTML",
                 reply_markup: {
@@ -98,7 +119,7 @@ ${semesters}
                         [
                             {
                                 text: "🌐 Open Website",
-                                url: `https://btebresultszone.com/results?roll=${roll}`
+                                url: `https://btebresultszone.com/results?roll=${student.roll}`
                             }
                         ]
                     ]
@@ -120,3 +141,43 @@ ${semesters}
     }
 
 }
+
+bot.command("result", (ctx) => {
+
+    const args = ctx.message.text.trim().split(/\s+/);
+
+    if (args.length < 2) {
+        return ctx.reply("Usage:\n/result 240363");
+    }
+
+    getResult(ctx, args[1]);
+
+});
+
+bot.on("text", (ctx) => {
+
+    const text = ctx.message.text.trim();
+
+    if (/^\d+$/.test(text)) {
+
+        getResult(ctx, text);
+
+    } else {
+
+        ctx.reply("❌ Please send a valid Board Roll.");
+
+    }
+
+});
+
+bot.telegram.getMe()
+.then((me)=>{
+    console.log("✅ Logged in as:", me.username);
+})
+.catch((err)=>{
+    console.error("❌ Telegram Error:", err.message);
+});
+
+bot.launch();
+
+console.log("🚀 SDPI Bot Started");
