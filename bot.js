@@ -10,6 +10,11 @@ const API_URL =
   process.env.API_URL ||
   "https://btebresultszone.com/api/student-results";
 
+// Student Name API (Google Apps Script)
+const STUDENT_NAME_API =
+  process.env.STUDENT_NAME_API ||
+  "https://script.google.com/macros/s/AKfycbwvdVnV106YtBKUkNdpFniGe0T4dilELuz1dyMb1l967sE1fYykY9-1IuqKqbxxubI/exec";
+
 // Admin Configuration
 const ADMIN_IDS = (process.env.ADMIN_IDS || "").split(",").map(id => id.trim()).filter(Boolean);
 const BOT_OWNER = process.env.BOT_OWNER || "SDPI";
@@ -19,6 +24,9 @@ const userState = {};
 
 // User Data Storage (In-memory - for demo purposes)
 const userData = {};
+
+// Student Name Cache (to reduce API calls)
+const studentNameCache = {};
 
 // Admin Stats
 let adminStats = {
@@ -175,6 +183,101 @@ http
   });
 
 // ===============================
+// STUDENT NAME API FUNCTIONS
+// ===============================
+
+/**
+ * Fetch student name from Google Apps Script API
+ * @param {string} roll - Student roll number
+ * @returns {Promise<Object>} - Student name data
+ */
+async function fetchStudentName(roll) {
+  try {
+    // Check cache first
+    if (studentNameCache[roll]) {
+      const cached = studentNameCache[roll];
+      // Cache for 1 hour
+      if (Date.now() - cached.timestamp < 3600000) {
+        return cached.data;
+      }
+    }
+
+    const response = await axios.get(STUDENT_NAME_API, {
+      params: { roll: roll },
+      timeout: 8000
+    });
+
+    const data = response.data;
+    
+    // Handle different response formats
+    let studentData = null;
+    
+    // Check if data is an array
+    if (Array.isArray(data) && data.length > 0) {
+      studentData = data[0];
+    } 
+    // Check if data is an object with results
+    else if (data && typeof data === 'object') {
+      if (data.data && Array.isArray(data.data) && data.data.length > 0) {
+        studentData = data.data[0];
+      } else if (data.result && Array.isArray(data.result) && data.result.length > 0) {
+        studentData = data.result[0];
+      } else if (data.student) {
+        studentData = data.student;
+      } else if (data.name) {
+        studentData = data;
+      }
+    }
+
+    // If no student data found
+    if (!studentData) {
+      return null;
+    }
+
+    // Normalize student data
+    const normalized = {
+      name: studentData.name || studentData.studentName || studentData.fullName || null,
+      roll: studentData.roll || studentData.rollNumber || roll,
+      batch: studentData.batch || studentData.batchNo || null,
+      session: studentData.session || studentData.academicSession || null,
+      department: studentData.department || studentData.dept || null,
+      shift: studentData.shift || null,
+      section: studentData.section || null,
+      semester: studentData.semester || studentData.currentSemester || null,
+      gender: studentData.gender || studentData.sex || null,
+      fatherName: studentData.fatherName || studentData.father || null,
+      motherName: studentData.motherName || studentData.mother || null,
+      phone: studentData.phone || studentData.mobile || null,
+      email: studentData.email || null,
+      institute: studentData.institute || studentData.instituteName || null,
+      status: studentData.status || null,
+    };
+
+    // Cache the result
+    studentNameCache[roll] = {
+      data: normalized,
+      timestamp: Date.now()
+    };
+
+    return normalized;
+
+  } catch (error) {
+    console.error(`Failed to fetch student name for roll ${roll}:`, error.message);
+    return null;
+  }
+}
+
+/**
+ * Get student name with roll (cached)
+ * @param {string} roll - Student roll number
+ * @returns {Promise<string|null>} - Student name or null
+ */
+async function getStudentName(roll) {
+  const studentData = await fetchStudentName(roll);
+  return studentData?.name || null;
+}
+
+// ===============================
 // ADMIN CHECK
 // ===============================
 
@@ -231,7 +334,8 @@ bot.start(async (ctx) => {
       selectedCurriculum: "diploma_in_engineering",
       firstSeen: Date.now(),
       lastSeen: Date.now(),
-      totalSearches: 0
+      totalSearches: 0,
+      savedStudentName: null // Store student name
     };
   } else {
     userData[userId].lastSeen = Date.now();
@@ -268,6 +372,7 @@ mainMenu
 • 📕 Referred Subjects
 • 🔄 Re-scrutiny Status
 • 📚 20+ Curriculum Support
+• 👤 Student Name Display
 
 📌 <b>How to Check Result:</b>
 1️⃣ Click "🔍 Check Result"
@@ -560,14 +665,15 @@ async function showUserList(ctx) {
 
   let userList = "";
   const recentUsers = users.slice(-10).reverse();
-  recentUsers.forEach((id, index) => {
+  for (const [index, id] of recentUsers.entries()) {
     const user = userData[id];
     if (user) {
       const lastSeen = user.lastSeen ? new Date(user.lastSeen).toLocaleString() : "Never";
       const hasSaved = user.savedRoll ? "⭐" : "❌";
-      userList += `${index + 1}. <code>${id}</code> ${hasSaved}\n   📅 ${lastSeen}\n`;
+      const name = user.savedStudentName || "N/A";
+      userList += `${index + 1}. <code>${id}</code> ${hasSaved}\n   👤 ${name}\n   📅 ${lastSeen}\n`;
     }
-  });
+  }
 
   const message =
 `👥 <b>User Management</b>
@@ -663,6 +769,7 @@ async function showSettings(ctx) {
 • Default Curriculum: <code>${userData[ctx.from.id]?.selectedCurriculum || "diploma_in_engineering"}</code>
 • Max History: <code>5</code>
 • Auto-save: <code>Enabled</code>
+• Student Name API: <code>${STUDENT_NAME_API ? "✅ Enabled" : "❌ Disabled"}</code>
 
 📢 <b>Broadcast Settings:</b>
 • Rate Limit: <code>50ms</code>
@@ -717,7 +824,8 @@ async function showLogs(ctx) {
   recentActivities.forEach((user, index) => {
     const time = user.lastSeen ? new Date(user.lastSeen).toLocaleString() : "Unknown";
     const roll = user.savedRoll || "No roll";
-    logs.push(`${index + 1}. 🆔 ${roll} - ${time}`);
+    const name = user.savedStudentName || "Unknown";
+    logs.push(`${index + 1}. 🆔 ${roll} - ${name} (${time})`);
   });
 
   await ctx.replyWithHTML(logs.join("\n"), {
@@ -978,8 +1086,10 @@ async function searchUser(ctx, query) {
     const lastSeen = data.lastSeen ? new Date(data.lastSeen).toLocaleString() : "Never";
     const savedRoll = data.savedRoll || "None";
     const searches = data.totalSearches || 0;
+    const name = data.savedStudentName || "N/A";
     userList += 
 `${index + 1}. 🆔 <code>${id}</code>
+   👤 Name: <b>${name}</b>
    📋 Roll: <code>${savedRoll}</code>
    🔍 Searches: ${searches}
    📅 Last Seen: ${lastSeen}
@@ -1079,7 +1189,8 @@ bot.action(/^check_curr_(.+)$/, async (ctx) => {
       searchHistory: [],
       lastResult: null,
       lastResultRescrutiny: null,
-      selectedCurriculum: curriculumId
+      selectedCurriculum: curriculumId,
+      savedStudentName: null
     };
   } else {
     userData[userId].selectedCurriculum = curriculumId;
@@ -1142,6 +1253,9 @@ bot.help(async (ctx) => {
 
 <b>📚 Select Curriculum</b>
 • আপনার Curriculum পরিবর্তন করুন
+
+<b>👤 Student Name</b>
+• Roll এর সাথে Student Name দেখুন
 
 <b>📝 Direct Search:</b>
 সরাসরি আপনার Board Roll পাঠান
@@ -1217,11 +1331,14 @@ mainMenu
       semesterGPA += `${status} <b>Semester ${s.semester}</b>: <code>${gpa}</code>\n`;
     });
 
+  const studentName = userData[userId]?.savedStudentName || "";
+  const nameDisplay = studentName ? `👤 <b>Name:</b> ${studentName}\n` : "";
+
   const message = 
 `📊 <b>Semester-wise GPA</b>
 
 🆔 <b>Roll:</b> <code>${student.roll}</code>
-🏫 <b>Institute:</b> ${student.institute.name}
+${nameDisplay}🏫 <b>Institute:</b> ${student.institute.name}
 
 ━━━━━━━━━━━━━━
 
@@ -1282,11 +1399,14 @@ mainMenu
     referredList += `${index + 1}. <code>${sub.subCode}</code> <b>${sub.subName}</b>\n   ↳ Semester ${sub.originSemester}\n\n`;
   });
 
+  const studentName = userData[userId]?.savedStudentName || "";
+  const nameDisplay = studentName ? `👤 <b>Name:</b> ${studentName}\n` : "";
+
   const message = 
 `📕 <b>Referred Subjects</b>
 
 🆔 <b>Roll:</b> <code>${student.roll}</code>
-📚 <b>Total Referred:</b> ${student.currentFailedSubjects.length}
+${nameDisplay}📚 <b>Total Referred:</b> ${student.currentFailedSubjects.length}
 
 ━━━━━━━━━━━━━━
 
@@ -1326,7 +1446,7 @@ mainMenu
   let historyText = "";
   const history = userData[userId].searchHistory.slice(0, 5);
   
-  history.forEach((item, index) => {
+  for (const [index, item] of history.entries()) {
     const date = new Date(item.timestamp).toLocaleDateString('bn-BD', {
       day: '2-digit',
       month: '2-digit',
@@ -1336,8 +1456,15 @@ mainMenu
     });
     const curriculum = item.curriculum ? Object.values(CURRICULUMS).find(c => c.id === item.curriculum) : null;
     const currEmoji = curriculum?.emoji || "📚";
-    historyText += `${index + 1}. ${currEmoji} <code>${item.roll}</code> - ${date}\n`;
-  });
+    
+    // Try to get student name from cache or API
+    let name = "";
+    if (studentNameCache[item.roll]) {
+      name = ` - ${studentNameCache[item.roll].data.name}`;
+    }
+    
+    historyText += `${index + 1}. ${currEmoji} <code>${item.roll}</code>${name}\n   📅 ${date}\n`;
+  }
 
   const message = 
 `📜 <b>Last 5 Search History</b>
@@ -1403,11 +1530,14 @@ mainMenu
     });
   }
 
+  const studentName = userData[userId]?.savedStudentName || "";
+  const nameDisplay = studentName ? `👤 <b>Name:</b> ${studentName}\n` : "";
+
   const message = 
 `🔄 <b>Re-scrutiny Status</b>
 
 🆔 <b>Roll:</b> <code>${student.roll}</code>
-📅 <b>Date:</b> <code>${r.date?.substring(0,10) || "N/A"}</code>
+${nameDisplay}📅 <b>Date:</b> <code>${r.date?.substring(0,10) || "N/A"}</code>
 📝 <b>Status:</b> ${r.publishedText || "Result Published"}
 
 ━━━━━━━━━━━━━━
@@ -1458,6 +1588,9 @@ bot.hears("📖 Help", async (ctx) => {
 <b>📚 Select Curriculum</b>
 • আপনার Curriculum পরিবর্তন করুন
 
+<b>👤 Student Name</b>
+• Roll এর সাথে Student Name দেখুন
+
 <b>📝 Direct Search:</b>
 সরাসরি আপনার Board Roll পাঠান
 
@@ -1474,7 +1607,7 @@ bot.hears("ℹ️ About", async (ctx) => {
 
 🎓 BTEB Student Result Bot
 
-⚡ Version: 4.0
+⚡ Version: 5.0
 
 ✨ <b>Features:</b>
 • Step-by-step Result Check
@@ -1484,10 +1617,12 @@ bot.hears("ℹ️ About", async (ctx) => {
 • Semester-wise GPA
 • Referred Subjects
 • Re-scrutiny Status
+• Student Name Display
 • Admin Panel
 
 🌐 Data Source:
 BTEB Results Zone
+Student Name API
 
 👨‍💻 Powered by ${BOT_OWNER}
 
@@ -1555,12 +1690,12 @@ mainMenu
   let historyText = "";
   const history = userData[userId].searchHistory.slice(0, 5);
   
-  history.forEach((item, index) => {
+  for (const [index, item] of history.entries()) {
     const date = new Date(item.timestamp).toLocaleDateString('bn-BD');
     const curriculum = item.curriculum ? Object.values(CURRICULUMS).find(c => c.id === item.curriculum) : null;
     const currEmoji = curriculum?.emoji || "📚";
     historyText += `${index + 1}. ${currEmoji} <code>${item.roll}</code> - ${date}\n`;
-  });
+  }
 
   await ctx.replyWithHTML(
 `📜 <b>Last 5 Search History</b>
@@ -1613,6 +1748,104 @@ ${Object.values(CURRICULUMS).map(c => `• ${c.id}`).join('\n')}`
 
 📚 ${curriculum.emoji} ${curriculum.name}`
   );
+});
+
+// /name command - Get student name for a roll
+bot.command("name", async (ctx) => {
+  const args = ctx.message.text.split(" ");
+  if (args.length < 2) {
+    return ctx.replyWithHTML(
+`❌ <b>Usage</b>
+
+<code>/name 240363</code>
+
+এই কমান্ড দিয়ে কোনো Roll-এর Student Name দেখতে পারবেন।`
+    );
+  }
+  
+  const roll = args[1];
+  if (!/^\d{6}$/.test(roll)) {
+    return ctx.replyWithHTML(
+`❌ <b>Invalid Roll Number</b>
+
+Example:
+<code>240363</code>`
+    );
+  }
+
+  const loading = await ctx.reply(`⏳ Searching for student name (Roll: ${roll})...`);
+  
+  try {
+    const studentData = await fetchStudentName(roll);
+    
+    if (!studentData || !studentData.name) {
+      return ctx.telegram.editMessageText(
+        ctx.chat.id,
+        loading.message_id,
+        undefined,
+`❌ <b>Student Not Found</b>
+
+Roll: <code>${roll}</code>
+
+এই Roll-এর জন্য কোনো Student Name পাওয়া যায়নি।`
+      );
+    }
+
+    // Build detailed student info
+    let details = "";
+    if (studentData.batch) details += `📅 Batch: ${studentData.batch}\n`;
+    if (studentData.session) details += `📚 Session: ${studentData.session}\n`;
+    if (studentData.department) details += `🏫 Dept: ${studentData.department}\n`;
+    if (studentData.shift) details += `🔄 Shift: ${studentData.shift}\n`;
+    if (studentData.section) details += `📋 Section: ${studentData.section}\n`;
+    if (studentData.semester) details += `📊 Semester: ${studentData.semester}\n`;
+    if (studentData.fatherName) details += `👨 Father: ${studentData.fatherName}\n`;
+    if (studentData.motherName) details += `👩 Mother: ${studentData.motherName}\n`;
+    if (studentData.phone) details += `📱 Phone: ${studentData.phone}\n`;
+    if (studentData.email) details += `📧 Email: ${studentData.email}\n`;
+    if (studentData.institute) details += `🏛️ Institute: ${studentData.institute}\n`;
+    if (studentData.gender) details += `⚧️ Gender: ${studentData.gender}\n`;
+
+    const message =
+`👤 <b>Student Information</b>
+
+🆔 <b>Roll:</b> <code>${studentData.roll}</code>
+📛 <b>Name:</b> <b>${studentData.name}</b>
+
+${details ? `━━━━━━━━━━━━━━\n${details}` : ''}
+
+💡 <b>Action:</b>
+Click below to check result for this student`;
+
+    await ctx.telegram.editMessageText(
+      ctx.chat.id,
+      loading.message_id,
+      undefined,
+      message,
+      {
+        parse_mode: "HTML",
+        reply_markup: {
+          inline_keyboard: [
+            [
+              {
+                text: "📊 Check Result",
+                callback_data: `check_roll_${studentData.roll}`
+              }
+            ]
+          ]
+        }
+      }
+    );
+
+  } catch (error) {
+    console.error(error);
+    await ctx.telegram.editMessageText(
+      ctx.chat.id,
+      loading.message_id,
+      undefined,
+      "❌ Failed to fetch student name. Please try again later."
+    );
+  }
 });
 
 // ===============================
@@ -1785,6 +2018,9 @@ Example:
     
     loading = await ctx.reply("⏳ Checking result...");
 
+    // Fetch student name in parallel with result
+    const studentNamePromise = getStudentName(roll);
+
     // API Call with curriculum
     const { data } = await axios.get(API_URL, {
       params: {
@@ -1811,6 +2047,9 @@ Example:
     const student = data.data.find(r => r.regulation !== 0) || data.data[0];
     const rescrutiny = data.data.find(r => r.regulation === 0);
 
+    // Get student name
+    const studentName = await studentNamePromise;
+
     // Save to user data
     if (!userData[userId]) {
       userData[userId] = {
@@ -1821,8 +2060,11 @@ Example:
         selectedCurriculum: curriculum,
         firstSeen: Date.now(),
         lastSeen: Date.now(),
-        totalSearches: 1
+        totalSearches: 1,
+        savedStudentName: studentName
       };
+    } else {
+      userData[userId].savedStudentName = studentName;
     }
 
     // Save result if not saved already
@@ -1831,6 +2073,7 @@ Example:
       userData[userId].lastResult = student;
       userData[userId].lastResultRescrutiny = rescrutiny;
       userData[userId].selectedCurriculum = curriculum;
+      userData[userId].savedStudentName = studentName;
       
       // Add to search history
       if (!userData[userId].searchHistory) {
@@ -1840,7 +2083,8 @@ Example:
       userData[userId].searchHistory.unshift({
         roll: roll,
         curriculum: curriculum,
-        timestamp: Date.now()
+        timestamp: Date.now(),
+        name: studentName
       });
       
       // Keep only last 5
@@ -1849,7 +2093,7 @@ Example:
       }
     }
 
-    await displayResult(ctx, student, roll, rescrutiny, loading);
+    await displayResult(ctx, student, roll, rescrutiny, loading, studentName);
 
   } catch (error) {
     console.error(error);
@@ -1880,7 +2124,7 @@ Example:
 // DISPLAY RESULT
 // ===============================
 
-async function displayResult(ctx, student, roll, rescrutiny = null, loading = null) {
+async function displayResult(ctx, student, roll, rescrutiny = null, loading = null, studentName = null) {
   // Semester Results
   let semesterText = "";
   student.semesterResults
@@ -1925,12 +2169,15 @@ async function displayResult(ctx, student, roll, rescrutiny = null, loading = nu
 📝 <b>Status:</b> ${r.publishedText || "Result Published"}`;
   }
 
+  // Student Name Display
+  const nameDisplay = studentName ? `👤 <b>Name:</b> ${studentName}\n` : "";
+
   // Final Message
   const message =
 `🎓 <b>BTEB Student Result</b>
 
 🆔 <b>Roll:</b> <code>${student.roll}</code>
-🏫 <b>Institute:</b> ${student.institute.name}
+${nameDisplay}🏫 <b>Institute:</b> ${student.institute.name}
 📍 <b>District:</b> ${student.institute.district}
 📚 <b>Regulation:</b> <code>${student.regulation}</code>
 
@@ -1950,7 +2197,8 @@ ${resText}
 • ⭐ My Result - সংরক্ষিত Result দেখুন
 • 📊 Semester GPA - Semester-wise GPA দেখুন
 • 📕 Referred Subjects - Referred Subjects দেখুন
-• 🔄 Re-scrutiny - Re-scrutiny স্ট্যাটাস দেখুন`;
+• 🔄 Re-scrutiny - Re-scrutiny স্ট্যাটাস দেখুন
+• 👤 /name [roll] - Student Name দেখুন`;
 
   const inlineKeyboard = [
     [
@@ -1984,6 +2232,10 @@ ${resText}
       }
     ],
     [
+      {
+        text: "👤 Student Name",
+        callback_data: `view_name_${student.roll}`
+      },
       {
         text: "🌐 Website",
         url: "https://btebresultszone.com"
@@ -2040,6 +2292,9 @@ Example:
     const userId = ctx.from.id;
     const curriculum = userData[userId]?.selectedCurriculum || "diploma_in_engineering";
 
+    // Fetch student name
+    const studentName = await getStudentName(roll);
+
     const { data } = await axios.get(API_URL, {
       params: {
         roll,
@@ -2064,19 +2319,23 @@ Example:
         selectedCurriculum: curriculum,
         firstSeen: Date.now(),
         lastSeen: Date.now(),
-        totalSearches: 0
+        totalSearches: 0,
+        savedStudentName: studentName
       };
     }
 
     userData[userId].savedRoll = roll;
     userData[userId].lastResult = student;
     userData[userId].lastResultRescrutiny = rescrutiny;
+    userData[userId].savedStudentName = studentName;
+
+    const nameDisplay = studentName ? `👤 <b>Name:</b> ${studentName}\n` : "";
 
     await ctx.replyWithHTML(
 `✅ <b>Result Saved Successfully!</b>
 
 🆔 <b>Roll:</b> <code>${student.roll}</code>
-🏫 <b>Institute:</b> ${student.institute.name}
+${nameDisplay}🏫 <b>Institute:</b> ${student.institute.name}
 
 💡 এখন "⭐ My Result" ব্যবহার করে দেখুন।`,
 mainMenu
@@ -2118,7 +2377,8 @@ bot.action("view_result", async (ctx) => {
   await ctx.answerCbQuery();
   
   if (userData[userId]?.lastResult) {
-    await displayResult(ctx, userData[userId].lastResult, userData[userId].savedRoll);
+    const studentName = userData[userId]?.savedStudentName || null;
+    await displayResult(ctx, userData[userId].lastResult, userData[userId].savedRoll, null, null, studentName);
   } else {
     await ctx.reply("❌ No result found. Please search again.");
   }
@@ -2134,6 +2394,9 @@ bot.action("view_gpa", async (ctx) => {
   }
 
   const student = userData[userId].lastResult;
+  const studentName = userData[userId]?.savedStudentName || "";
+  const nameDisplay = studentName ? `👤 <b>Name:</b> ${studentName}\n` : "";
+  
   let semesterGPA = "";
   
   student.semesterResults
@@ -2150,8 +2413,7 @@ bot.action("view_gpa", async (ctx) => {
 `📊 <b>Semester-wise GPA</b>
 
 🆔 <b>Roll:</b> <code>${student.roll}</code>
-
-━━━━━━━━━━━━━━
+${nameDisplay}━━━━━━━━━━━━━━
 
 ${semesterGPA}
 
@@ -2169,6 +2431,8 @@ bot.action("view_referred", async (ctx) => {
   }
 
   const student = userData[userId].lastResult;
+  const studentName = userData[userId]?.savedStudentName || "";
+  const nameDisplay = studentName ? `👤 <b>Name:</b> ${studentName}\n` : "";
   
   if (!student.currentFailedSubjects?.length) {
     return ctx.replyWithHTML(
@@ -2176,7 +2440,8 @@ bot.action("view_referred", async (ctx) => {
 
 আপনার কোনো Referred Subject নেই।
 
-🎉 <b>Roll:</b> <code>${student.roll}</code>`
+🆔 <b>Roll:</b> <code>${student.roll}</code>
+${nameDisplay}`
     );
   }
 
@@ -2189,7 +2454,7 @@ bot.action("view_referred", async (ctx) => {
 `📕 <b>Referred Subjects</b>
 
 🆔 <b>Roll:</b> <code>${student.roll}</code>
-📚 <b>Total Referred:</b> ${student.currentFailedSubjects.length}
+${nameDisplay}📚 <b>Total Referred:</b> ${student.currentFailedSubjects.length}
 
 ━━━━━━━━━━━━━━
 
@@ -2210,6 +2475,7 @@ bot.action("view_rescrutiny", async (ctx) => {
     );
   }
 
+  const student = userData[userId].lastResult;
   const rescrutiny = userData[userId].lastResultRescrutiny;
   const r = rescrutiny.latestResults[0];
   
@@ -2220,10 +2486,14 @@ bot.action("view_rescrutiny", async (ctx) => {
     });
   }
 
+  const studentName = userData[userId]?.savedStudentName || "";
+  const nameDisplay = studentName ? `👤 <b>Name:</b> ${studentName}\n` : "";
+
   await ctx.replyWithHTML(
 `🔄 <b>Re-scrutiny Status</b>
 
-📅 <b>Date:</b> <code>${r.date?.substring(0,10) || "N/A"}</code>
+🆔 <b>Roll:</b> <code>${student?.roll || "N/A"}</code>
+${nameDisplay}📅 <b>Date:</b> <code>${r.date?.substring(0,10) || "N/A"}</code>
 📝 <b>Status:</b> ${r.publishedText || "Result Published"}
 
 ━━━━━━━━━━━━━━
@@ -2244,12 +2514,13 @@ bot.action("view_history", async (ctx) => {
   let historyText = "";
   const history = userData[userId].searchHistory.slice(0, 5);
   
-  history.forEach((item, index) => {
+  for (const [index, item] of history.entries()) {
     const date = new Date(item.timestamp).toLocaleDateString('bn-BD');
     const curriculum = item.curriculum ? Object.values(CURRICULUMS).find(c => c.id === item.curriculum) : null;
     const currEmoji = curriculum?.emoji || "📚";
-    historyText += `${index + 1}. ${currEmoji} <code>${item.roll}</code> - ${date}\n`;
-  });
+    const name = item.name || "";
+    historyText += `${index + 1}. ${currEmoji} <code>${item.roll}</code>${name ? ` - ${name}` : ''}\n   📅 ${date}\n`;
+  }
 
   await ctx.replyWithHTML(
 `📜 <b>Last 5 Search History</b>
@@ -2292,6 +2563,94 @@ bot.action("search_again", async (ctx) => {
   );
 });
 
+// View Student Name
+bot.action(/^view_name_(.+)$/, async (ctx) => {
+  const roll = ctx.match[1];
+  await ctx.answerCbQuery();
+  
+  const loading = await ctx.reply(`⏳ Fetching student name for roll ${roll}...`);
+  
+  try {
+    const studentData = await fetchStudentName(roll);
+    
+    if (!studentData || !studentData.name) {
+      return ctx.telegram.editMessageText(
+        ctx.chat.id,
+        loading.message_id,
+        undefined,
+`❌ <b>Student Not Found</b>
+
+Roll: <code>${roll}</code>
+
+এই Roll-এর জন্য কোনো Student Name পাওয়া যায়নি।`
+      );
+    }
+
+    let details = "";
+    if (studentData.batch) details += `📅 Batch: ${studentData.batch}\n`;
+    if (studentData.session) details += `📚 Session: ${studentData.session}\n`;
+    if (studentData.department) details += `🏫 Dept: ${studentData.department}\n`;
+    if (studentData.shift) details += `🔄 Shift: ${studentData.shift}\n`;
+    if (studentData.section) details += `📋 Section: ${studentData.section}\n`;
+    if (studentData.semester) details += `📊 Semester: ${studentData.semester}\n`;
+    if (studentData.fatherName) details += `👨 Father: ${studentData.fatherName}\n`;
+    if (studentData.motherName) details += `👩 Mother: ${studentData.motherName}\n`;
+    if (studentData.phone) details += `📱 Phone: ${studentData.phone}\n`;
+    if (studentData.email) details += `📧 Email: ${studentData.email}\n`;
+    if (studentData.institute) details += `🏛️ Institute: ${studentData.institute}\n`;
+    if (studentData.gender) details += `⚧️ Gender: ${studentData.gender}\n`;
+
+    const message =
+`👤 <b>Student Information</b>
+
+🆔 <b>Roll:</b> <code>${studentData.roll}</code>
+📛 <b>Name:</b> <b>${studentData.name}</b>
+
+${details ? `━━━━━━━━━━━━━━\n${details}` : ''}
+
+💡 <b>Action:</b>
+Click below to check result for this student`;
+
+    await ctx.telegram.editMessageText(
+      ctx.chat.id,
+      loading.message_id,
+      undefined,
+      message,
+      {
+        parse_mode: "HTML",
+        reply_markup: {
+          inline_keyboard: [
+            [
+              {
+                text: "📊 Check Result",
+                callback_data: `check_roll_${studentData.roll}`
+              }
+            ]
+          ]
+        }
+      }
+    );
+
+  } catch (error) {
+    console.error(error);
+    await ctx.telegram.editMessageText(
+      ctx.chat.id,
+      loading.message_id,
+      undefined,
+      "❌ Failed to fetch student name. Please try again later."
+    );
+  }
+});
+
+// Check Roll from Name View
+bot.action(/^check_roll_(.+)$/, async (ctx) => {
+  const roll = ctx.match[1];
+  await ctx.answerCbQuery();
+  const userId = ctx.from.id;
+  const curriculum = userData[userId]?.selectedCurriculum || "diploma_in_engineering";
+  await getResult(ctx, roll, false, curriculum);
+});
+
 // Admin View User
 bot.action("admin_view_user", async (ctx) => {
   if (!isAdmin(ctx)) return;
@@ -2308,13 +2667,14 @@ bot.action("admin_view_user", async (ctx) => {
 
 🆔 <b>User ID:</b> <code>${userId}</code>
 📋 <b>Saved Roll:</b> <code>${user.savedRoll || "None"}</code>
+👤 <b>Student Name:</b> ${user.savedStudentName || "N/A"}
 🔍 <b>Total Searches:</b> ${user.totalSearches || 0}
 📚 <b>Curriculum:</b> ${getCurriculumName(user.selectedCurriculum)}
 📅 <b>First Seen:</b> ${user.firstSeen ? new Date(user.firstSeen).toLocaleString() : "Unknown"}
 📅 <b>Last Seen:</b> ${user.lastSeen ? new Date(user.lastSeen).toLocaleString() : "Unknown"}
 
 📜 <b>Search History:</b>
-${user.searchHistory?.slice(0, 3).map(h => `• <code>${h.roll}</code> - ${new Date(h.timestamp).toLocaleString()}`).join("\n") || "No history"}`;
+${user.searchHistory?.slice(0, 3).map(h => `• <code>${h.roll}</code> ${h.name || ''} - ${new Date(h.timestamp).toLocaleString()}`).join("\n") || "No history"}`;
 
   await ctx.replyWithHTML(message);
 });
@@ -2344,6 +2704,7 @@ bot.launch().then(async () => {
   console.log(`🤖 Bot : @${me.username}`);
   console.log(`🆔 ID  : ${me.id}`);
   console.log(`👑 Admins: ${ADMIN_IDS.join(", ") || "None"}`);
+  console.log(`👤 Student Name API: ${STUDENT_NAME_API ? "✅ Enabled" : "❌ Disabled"}`);
   console.log("✅ BTEB Result Bot Started");
   console.log("━━━━━━━━━━━━━━━━━━━━━━━━━━");
 });
