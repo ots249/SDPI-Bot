@@ -2,201 +2,195 @@ require("dotenv").config();
 
 const { Telegraf, Markup } = require("telegraf");
 const axios = require("axios");
+const http = require("http");
 
 const bot = new Telegraf(process.env.BOT_TOKEN);
 
-const API = process.env.API_URL || "https://btebresultszone.com/api/student-results";
+const API =
+  process.env.API_URL ||
+  "https://btebresultszone.com/api/student-results";
 
+// Railway Health Check
+http
+  .createServer((req, res) => {
+    res.writeHead(200, { "Content-Type": "text/plain" });
+    res.end("BTEB Bot is Running ✅");
+  })
+  .listen(process.env.PORT || 3000);
+
+// Start
 bot.start((ctx) => {
-    ctx.reply(
-`🎓 Welcome to SDPI Bot
+  ctx.replyWithHTML(
+`🎓 <b>BTEB Result Bot</b>
 
-📌 Send your Board Roll
+শুধু আপনার <b>Board Roll</b> পাঠান।
 
-Example:
-240363
+উদাহরণ:
+<code>240312</code>
 
-Or
-
-/result 240363`,
-        Markup.inlineKeyboard([
-            [
-                Markup.button.url(
-                    "🌐 BTEB Results Zone",
-                    "https://btebresultszone.com"
-                )
-            ]
-        ])
-    );
+অথবা
+<code>/result 240312</code>`
+  );
 });
 
+// Help
 bot.help((ctx) => {
-    ctx.reply(
-`📖 Commands
+  ctx.replyWithHTML(
+`📖 <b>ব্যবহারবিধি</b>
 
-/result <roll>
+• শুধু Roll পাঠান
+• অথবা
 
-Example:
-/result 240363`
-    );
+<code>/result 240312</code>`
+  );
+});
+
+// /result command
+bot.command("result", async (ctx) => {
+
+  const roll = ctx.message.text.split(" ")[1];
+
+  if (!roll) {
+    return ctx.reply("❌ ব্যবহার:\n/result 240312");
+  }
+
+  await getResult(ctx, roll);
+
+});
+
+// Roll only
+bot.on("text", async (ctx) => {
+
+  const text = ctx.message.text.trim();
+
+  if (/^\d+$/.test(text)) {
+
+    await getResult(ctx, text);
+
+  }
+
 });
 
 async function getResult(ctx, roll) {
+  try {
+    const wait = await ctx.reply("⏳ Checking result...");
 
-    const loading = await ctx.reply("🔍 Searching...");
+    const { data } = await axios.get(API, {
+      params: {
+        roll,
+        curriculumId: "diploma_in_engineering",
+      },
+      timeout: 15000,
+    });
 
-    try {
+    if (!data.success || !data.data || !data.data.length) {
+      return ctx.telegram.editMessageText(
+        ctx.chat.id,
+        wait.message_id,
+        undefined,
+        "❌ Result not found."
+      );
+    }
 
-        const response = await axios.get(API, {
-            params: {
-                roll: roll,
-                curriculumId: "diploma_in_engineering"
-            },
-            timeout: 15000
+    // Main Result
+    const student = data.data.find((x) => x.regulation !== 0) || data.data[0];
+
+    // Re-scrutiny
+    const rescrutiny = data.data.find((x) => x.regulation === 0);
+
+    // Semester Status
+    let semesterText = "";
+    if (student.semesterResults?.length) {
+      student.semesterResults
+        .sort((a, b) => b.semester - a.semester)
+        .forEach((s) => {
+          let icon = "❓";
+          if (s.status === "passed") icon = "✅";
+          if (s.status === "failed") icon = "❌";
+
+          semesterText += `${icon} Semester ${s.semester}: ${s.status.toUpperCase()}\n`;
         });
+    }
 
-        const json = response.data;
+    // Referred Subjects
+    let referredText = "✅ None";
 
-        console.log(JSON.stringify(json, null, 2));
+    if (student.currentFailedSubjects?.length) {
+      referredText = student.currentFailedSubjects
+        .map(
+          (s) =>
+            `• ${s.subCode} - ${s.subName} (S${s.originSemester})`
+        )
+        .join("\n");
+    }
 
-        if (!json.success || !json.data || json.data.length === 0) {
+    // Re-scrutiny
+    let resText = "";
 
-            return ctx.telegram.editMessageText(
-                ctx.chat.id,
-                loading.message_id,
-                undefined,
-                "❌ Result not found."
-            );
+    if (
+      rescrutiny &&
+      rescrutiny.latestResults &&
+      rescrutiny.latestResults.length
+    ) {
+      const r = rescrutiny.latestResults[0];
 
-        }
+      resText =
+`\n🔄 <b>Re-scrutiny</b>
+📅 ${r.date.substring(0,10)}
+${r.publishedText || "Result Published"}`;
+    }
 
-        const student = json.data[0];
-
-        let semesterText = "";
-
-        if (student.latestResults) {
-
-            student.latestResults.forEach(r => {
-
-                semesterText +=
-`📘 Semester : ${r.semester}
-⭐ GPA : ${r.gpa}
-📅 Date : ${r.date.substring(0,10)}
-
-`;
-
-            });
-
-        }
-
-        const text =
+    const message =
 `🎓 <b>BTEB Student Result</b>
 
-🆔 <b>Roll:</b> ${student.roll}
+🆔 <b>Roll:</b> <code>${student.roll}</code>
 
-🏫 <b>Institute:</b>
+🏫 <b>Institute</b>
 ${student.institute.name}
 
-📍 <b>District:</b>
-${student.institute.district}
-
-📚 <b>Regulation:</b>
-${student.regulation}
+📍 ${student.institute.district}
+📚 Regulation: ${student.regulation}
 
 ━━━━━━━━━━━━━━
 
-${semesterText}`;
+📊 <b>Semester Result</b>
+${semesterText}
 
-        await ctx.telegram.editMessageText(
-            ctx.chat.id,
-            loading.message_id,
-            undefined,
-            text,
-            {
-                parse_mode: "HTML",
-                reply_markup: {
-                    inline_keyboard: [
-                        [
-                            {
-                                text: "🌐 Open Website",
-                                url: `https://btebresultszone.com/results?roll=${student.roll}`
-                            }
-                        ]
-                    ]
-                }
-            }
-        );
+📕 <b>Referred Subjects (${student.currentFailedSubjects.length})</b>
+${referredText}${resText}`;
 
-    } catch (err) {
+    await ctx.telegram.editMessageText(
+      ctx.chat.id,
+      wait.message_id,
+      undefined,
+      message,
+      {
+        parse_mode: "HTML",
+        reply_markup: {
+          inline_keyboard: [
+            [
+              {
+                text: "🌐 Website",
+                url: "https://btebresultszone.com",
+              },
+            ],
+          ],
+        },
+      }
+    );
+  } catch (err) {
+    console.error(err);
 
-        console.error(err.response?.data || err.message);
-
-        await ctx.telegram.editMessageText(
-            ctx.chat.id,
-            loading.message_id,
-            undefined,
-            "❌ Server Error."
-        );
-
-    }
-
+    ctx.reply(
+      "❌ Failed to fetch result.\nPlease try again later."
+    );
+  }
 }
 
-bot.command("result", (ctx) => {
-
-    const args = ctx.message.text.trim().split(/\s+/);
-
-    if (args.length < 2) {
-        return ctx.reply("Usage:\n/result 240363");
-    }
-
-    getResult(ctx, args[1]);
-
-});
-
-bot.on("text", (ctx) => {
-
-    const text = ctx.message.text.trim();
-
-    if (/^\d+$/.test(text)) {
-
-        getResult(ctx, text);
-
-    } else {
-
-        ctx.reply("❌ Please send a valid Board Roll.");
-
-    }
-
-});
-
-bot.telegram.getMe()
-.then((me)=>{
-    console.log("✅ Logged in as:", me.username);
-})
-.catch((err)=>{
-    console.error("❌ Telegram Error:", err.message);
-});
-
-bot.launch();
-
-console.log("🚀 SDPI Bot Started");
-
+// Launch Bot
 bot.launch().then(() => {
-    console.log("🤖 Bot Started Successfully");
+  console.log(`✅ Logged in as @${bot.botInfo.username}`);
 });
 
 process.once("SIGINT", () => bot.stop("SIGINT"));
 process.once("SIGTERM", () => bot.stop("SIGTERM"));
-
-// Railway health check
-const http = require("http");
-
-const PORT = process.env.PORT || 3000;
-
-http.createServer((req, res) => {
-    res.writeHead(200);
-    res.end("SDPI Bot is running");
-}).listen(PORT, () => {
-    console.log(`Health server listening on ${PORT}`);
-});
