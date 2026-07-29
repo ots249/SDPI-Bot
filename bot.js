@@ -181,3 +181,22 @@ bot.telegram.getMe()
 bot.launch();
 
 console.log("🚀 SDPI Bot Started");
+
+bot.launch().then(() => {
+    console.log("🤖 Bot Started Successfully");
+});
+
+process.once("SIGINT", () => bot.stop("SIGINT"));
+process.once("SIGTERM", () => bot.stop("SIGTERM"));
+
+// Railway health check
+const http = require("http");
+
+const PORT = process.env.PORT || 3000;
+
+http.createServer((req, res) => {
+    res.writeHead(200);
+    res.end("SDPI Bot is running");
+}).listen(PORT, () => {
+    console.log(`Health server listening on ${PORT}`);
+});
